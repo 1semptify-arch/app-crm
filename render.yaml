@@ -1,0 +1,15 @@
+# Render blueprint — app-crm static site (free tier).
+# Vite bakes VITE_* vars at build time, so they live here as build env.
+services:
+  - type: web
+    name: app-crm
+    runtime: static
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_GOOGLE_CLIENT_ID
+        value: 144818423056-mkrapqleqae2eer9n8q5ivsclshh7vns.apps.googleusercontent.com
