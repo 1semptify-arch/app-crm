@@ -12,11 +12,12 @@ import type {
   SearchResults,
 } from '../types';
 import { DriveStore, isDriveConfigured } from './driveStore';
+import { HttpStore, isCaseServed } from './httpStore';
 import { LocalStore } from './localStore';
 import { SupabaseStore, isSupabaseConfigured } from './supabaseStore';
 
 export interface Store {
-  readonly mode: 'local' | 'supabase' | 'drive';
+  readonly mode: 'local' | 'supabase' | 'drive' | 'case';
   // Cross-module plugin state (settings-style): one row per (plugin, key).
   // Same shape on all three backends — plugin_data rows with
   // entity_type 'setting' and data { key, value }.
@@ -62,11 +63,16 @@ let instance: Store | null = null;
 
 export function getStore(): Store {
   if (!instance) {
-    instance = isSupabaseConfigured
-      ? new SupabaseStore()
-      : isDriveConfigured
-        ? new DriveStore()
-        : new LocalStore();
+    // Case-served builds (crm_store.py injects the marker meta) bind to the
+    // case's Postgres via /api — that IS the data, it wins over configured
+    // personal stores. Standalone hosting keeps the original precedence.
+    instance = isCaseServed()
+      ? new HttpStore()
+      : isSupabaseConfigured
+        ? new SupabaseStore()
+        : isDriveConfigured
+          ? new DriveStore()
+          : new LocalStore();
   }
   return instance;
 }

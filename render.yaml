@@ -1,4 +1,6 @@
 # Render blueprint — app-crm static site (free tier).
+# Copied verbatim into the deploy repo (1semptify-arch/app-crm) by
+# tools/publish.sh — Render reads it from there.
 # Vite bakes VITE_* vars at build time, so they live here as build env.
 services:
   - type: web

@@ -21,8 +21,9 @@ Snapshot 2026-11-18. Goal: Act!-class CRM on Semptify's OAuth-storage spine
 - **Documents** — attachments on contacts/matters; Drive mode stores real
   files in appDataFolder (hidden), local mode <1MB, Supabase metadata-only.
 - **Email** — templates with merge fields, mailto send+log one click,
-  plugin seam (`EmailPlugin`) + smart-brain inbound sync stub
-  (needs an inbound-mail JSON endpoint to activate).
+  plugin seam (`EmailPlugin`) + smart-brain inbound sync — case-served
+  builds self-wire to `/api/mail/inbound` (crm_store's Gmail-IMAP read);
+  standalone builds use `VITE_CRM_INBOUND_MAIL_URL` or Gmail OAuth.
 - **Search** — Ctrl+K across contacts (name/org/role/email/phone),
   appointments, interactions, matters.
 - **UI shell** — deterministic FSM toolbar (default/selection/form),
@@ -33,15 +34,19 @@ Snapshot 2026-11-18. Goal: Act!-class CRM on Semptify's OAuth-storage spine
 
 ## Remaining gaps (honest)
 
-- **Hosting** — localhost only; HTTPS hosting needed for phone install and
-  phone testing. Add deployed origin to the same OAuth client when hosted.
-- **Real email transport** — mailto merge only; sending from the app needs
-  Resend/Gmail send scope (plugin seam ready). Inbound smart-brain needs a
-  JSON endpoint serving new mail.
-- **Recurrence v1** — whole-series edits only; conflict check doesn't
-  expand series-vs-series overlaps.
+- **Hosting** — Render static site deploys from the `1semptify-arch/app-crm`
+  repo (public deploy mirror; canonical source is private
+  `1semptify-arch/app-crm-src` — see docs/HOSTING.md). One Brad-side step
+  remains: add the deployed
+  origin to the OAuth client's Authorized JavaScript origins, and add the
+  two Gmail scopes to the consent screen.
+- **Email transport** — Gmail send + inbox sync work through the plugin
+  seam (gmail.send / gmail.readonly, consent on first use). No Resend
+  path — Gmail covers the need with zero servers. `tools/inbox_endpoint.py`
+  exists for tools that want to push mail in via JSON instead.
+- **Recurrence** — conflict check is now series-aware (expands both sides
+  over a ~2y horizon). Still whole-series edits only.
 - **No report engine** — CSV exports are the reporting layer.
-- **Attachments on Supabase** — metadata only (no binary store).
 - **Merge on Drive/Supabase attachments** — best-effort re-add+delete;
   no upsertAttachment exists.
 - **Migration A (flagship)** — token vault-first; unrelated to this app,

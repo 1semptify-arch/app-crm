@@ -1,7 +1,9 @@
 import { format, isValid, parseISO } from 'date-fns';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getStore } from '../lib/store';
+import { isPickerConfigured } from '../services/drivePicker';
 import type { Attachment } from '../types';
+import { DriveVaultPicker } from './DriveVaultPicker';
 import { Icon } from './ui';
 
 function fmtSize(bytes: number): string {
@@ -68,6 +70,43 @@ export function AttachmentsSection({
     }
   }
 
+  // Read-only pull from the user's own Drive — the vault browser lists the
+  // client-visible Semptify5.0/ tree; Google's picker covers files the
+  // client can't see yet. Lazy drive.file consent appears on first use,
+  // never at sign-in. Bytes land in their own appDataFolder. Nothing
+  // document-related touches Semptify.
+  const [vaultOpen, setVaultOpen] = useState(false);
+
+  async function attachDriveFiles(
+    files: { name: string; mimeType: string; blob: Blob }[],
+  ) {
+    setVaultOpen(false);
+    setBusy(true);
+    setError(null);
+    try {
+      for (const f of files) {
+        await getStore().addAttachment(
+          {
+            contact_id: contactId ?? null,
+            matter_id: matterId ?? null,
+            filename: f.name,
+            mime_type: f.mimeType || 'application/octet-stream',
+            size_bytes: f.blob.size,
+          },
+          f.blob,
+        );
+      }
+      load();
+      onChanged();
+    } catch (e) {
+      setError(
+        e instanceof Error ? e.message : 'Could not read from Drive.',
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function download(a: Attachment) {
     setError(null);
     try {
@@ -103,14 +142,27 @@ export function AttachmentsSection({
         <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-500">
           Documents
         </h3>
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => inputRef.current?.click()}
-          className="inline-flex min-h-[44px] items-center rounded-lg border border-gray-200 px-4 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-        >
-          Attach
-        </button>
+        <div className="flex items-center gap-2">
+          {getStore().mode === 'drive' && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => setVaultOpen(true)}
+              title="Browse your Semptify folder or pick Drive files — we only ever see the files you choose, and we only read them"
+              className="inline-flex min-h-[44px] items-center rounded-lg border border-gray-200 px-4 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            >
+              From Drive
+            </button>
+          )}
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => inputRef.current?.click()}
+            className="inline-flex min-h-[44px] items-center rounded-lg border border-gray-200 px-4 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          >
+            Attach
+          </button>
+        </div>
         <input
           ref={inputRef}
           type="file"
@@ -119,6 +171,12 @@ export function AttachmentsSection({
           onChange={(e) => attach(e.target.files)}
         />
       </div>
+      {getStore().mode === 'drive' && (
+        <p className="mb-2 text-xs text-gray-400">
+          From Drive reads only inside your Semptify folder — and only the
+          files you choose. It never writes to them.
+        </p>
+      )}
       {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
       {items.length === 0 ? (
         <p className="text-sm text-gray-400">No documents yet.</p>
@@ -151,6 +209,13 @@ export function AttachmentsSection({
             </li>
           ))}
         </ul>
+      )}
+      {vaultOpen && (
+        <DriveVaultPicker
+          pickerEnabled={isPickerConfigured}
+          onAttach={attachDriveFiles}
+          onClose={() => setVaultOpen(false)}
+        />
       )}
     </section>
   );

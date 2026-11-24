@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { getStore } from '../../lib/store';
-import type { Contact } from '../../types';
+import { CONTACT_KINDS, CONTACT_STATUSES, type Contact } from '../../types';
 import { Field, GhostButton, Icon, PrimaryButton, inputClass } from '../ui';
 
 const ROLE_SUGGESTIONS = [
@@ -43,6 +43,8 @@ export function ContactForm({
   const [address, setAddress] = useState(contact?.address ?? '');
   const [website, setWebsite] = useState(contact?.website ?? '');
   const [tags, setTags] = useState((contact?.tags ?? []).join(', '));
+  const [kind, setKind] = useState(contact?.kind ?? 'other');
+  const [status, setStatus] = useState(contact?.status ?? 'new');
   const [customFields, setCustomFields] = useState<CustomFieldRow[]>(() =>
     customFieldRows(contact),
   );
@@ -93,6 +95,8 @@ export function ContactForm({
           .split(',')
           .map((t) => t.trim())
           .filter(Boolean),
+        kind: kind || 'other',
+        status: status || 'new',
         plugin_data,
       });
       onSaved(saved);
@@ -170,6 +174,34 @@ export function ContactForm({
           placeholder="jane@example.com"
         />
       </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Kind">
+          <select
+            className={inputClass}
+            value={kind}
+            onChange={(e) => setKind(e.target.value)}
+          >
+            {CONTACT_KINDS.map((k) => (
+              <option key={k} value={k}>
+                {k}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Status">
+          <select
+            className={inputClass}
+            value={status}
+            onChange={(e) => setStatus(e.target.value)}
+          >
+            {CONTACT_STATUSES.map((s) => (
+              <option key={s} value={s}>
+                {s.replaceAll('_', ' ')}
+              </option>
+            ))}
+          </select>
+        </Field>
+      </div>
       <Field label="Tags (comma separated)">
         <input
           className={inputClass}
@@ -234,7 +266,7 @@ export function ContactForm({
       {error && <p className="text-sm text-red-600">{error}</p>}
       <div className="flex gap-3">
         <PrimaryButton onClick={save} disabled={saving || !name.trim()}>
-          {saving ? 'Saving…' : contact ? 'Save changes' : 'Add contact'}
+          {saving ? 'Saving…' : contact?.id ? 'Save changes' : 'Add contact'}
         </PrimaryButton>
         <GhostButton onClick={onCancel}>Cancel</GhostButton>
       </div>

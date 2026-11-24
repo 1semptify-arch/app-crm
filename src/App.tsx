@@ -18,10 +18,13 @@ import { Icon, matterStageText, statusText, type IconName } from './components/u
 import { AppointmentsView } from './components/views/AppointmentsView';
 import { CalendarView } from './components/views/CalendarView';
 import { ContactsView } from './components/views/ContactsView';
+import { DeskView } from './components/views/DeskView';
+import { FlowsView } from './components/views/FlowsView';
 import { InboxView } from './components/views/InboxView';
 import { MattersView } from './components/views/MattersView';
 import { TodayView } from './components/views/TodayView';
 import { getDriveSession, signOutOfDrive } from './lib/driveStore';
+import { isCaseServed } from './lib/httpStore';
 import { seedCampaign } from './lib/seedCampaign';
 import { downloadVCard } from './lib/vcard';
 import { getStore, isDriveConfigured, isSupabaseConfigured, resetStore } from './lib/store';
@@ -29,17 +32,40 @@ import { getSession, signOut } from './lib/supabaseStore';
 import { toolbarActions, toolbarMode, type DrawerState, type ViewKey } from './lib/uiState';
 import type { Appointment, ApptStatus, Contact, Interaction, Matter } from './types';
 
+// Case-served builds (crm_store.py) get the Send view — packet flows live
+// on the case's ops_state and only exist behind its /api.
+const CASE_SERVED = isCaseServed();
+
+// :8800 one-window mount (P3): ?embed=1 means comm_center's shell IS the
+// chrome — the app titlebar (CRM wordmark + mode badge) drops out, while
+// the nav rail (the tool's tab row) and the action/search buttons stay so
+// the surface remains fully usable inside the iframe. embed+task are
+// preserved on URL rewrites so a refresh can't drop the flag.
+const EMBED = new URLSearchParams(window.location.search).get('embed') === '1';
+
+function preservedEmbedQuery(): string {
+  const keep = new URLSearchParams();
+  for (const k of ['embed', 'task']) {
+    const v = new URLSearchParams(window.location.search).get(k);
+    if (v) keep.set(k, v);
+  }
+  const qs = keep.toString();
+  return qs ? `?${qs}` : '';
+}
+
 const NAV: {
   key: ViewKey;
   label: string;
   icon: IconName;
 }[] = [
   { key: 'today', label: 'Today', icon: 'sun' },
+  { key: 'desk', label: 'Desk', icon: 'phone' },
   { key: 'calendar', label: 'Calendar', icon: 'calendar' },
   { key: 'appointments', label: 'Bookings', icon: 'clock' },
   { key: 'contacts', label: 'Contacts', icon: 'users' },
   { key: 'inbox', label: 'Log', icon: 'inbox' },
   { key: 'matters', label: 'Matters', icon: 'briefcase' },
+  ...(CASE_SERVED ? [{ key: 'flows', label: 'Send', icon: 'send' } as const] : []),
 ];
 
 export default function App() {
@@ -49,11 +75,20 @@ export default function App() {
   const [interactions, setInteractions] = useState<Interaction[]>([]);
   const [reloadKey, setReloadKey] = useState(0);
   const [drawer, setDrawer] = useState<DrawerState>(null);
+  const [deskContactId, setDeskContactId] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [flowKey, setFlowKey] = useState<string | null>(null);
 
   const reload = useCallback(() => setReloadKey((k) => k + 1), []);
 
   useEffect(() => {
+    if (CASE_SERVED) {
+      // The case API IS the session — no OAuth round-trip to sit in front
+      // of it even when Drive/Supabase envs happen to be baked into the
+      // same build.
+      setAuthed(true);
+      return;
+    }
     if (isSupabaseConfigured) {
       getSession()
         .then((s) => setAuthed(Boolean(s)))
@@ -100,6 +135,72 @@ export default function App() {
         .catch(() => setInteractions([]));
     }
   }, [authed, reloadKey]);
+
+  // Deep links — the case server (crm_store.py) 302s retired :8888/:8777
+  // URLs here as /?view=..&contact=..&drawer=..&flow=.. . Applied once
+  // (after contacts land so names/emails resolve), then the URL is
+  // replaced so refreshes and in-app nav aren't re-hijacked.
+  useEffect(() => {
+    if (authed !== true || contacts.length === 0) return;
+    const p = new URLSearchParams(window.location.search);
+    if (
+      !['view', 'contact', 'contact_name', 'drawer', 'flow', 'search', 'to']
+        .some((k) => p.get(k))
+    )
+      return;
+    const rawCid = (p.get('contact') || '').replace(/^c/i, '');
+    let contactId = rawCid ? `c${rawCid}` : '';
+    const findByName = (name: string) =>
+      contacts.find((c) => c.name.trim().toLowerCase() === name.trim().toLowerCase());
+    const findByEmail = (em: string) =>
+      contacts.find((c) => (c.email || '').toLowerCase() === em.toLowerCase());
+    if (!contactId && p.get('contact_name')) {
+      const hit = findByName(p.get('contact_name')!);
+      if (hit) contactId = hit.id;
+    }
+    const to = p.get('to') || '';
+    if (!contactId && to) {
+      const hit = findByEmail(to);
+      if (hit) contactId = hit.id;
+    }
+    const view = p.get('view') as ViewKey | null;
+    if (view === 'desk' && contactId) {
+      setDeskContactId(contactId);
+      setView('desk');
+    } else if (view) {
+      setView(view);
+      if (contactId) setDeskContactId(contactId);
+    }
+    switch (p.get('drawer')) {
+      case 'log-email':
+        setDrawer({
+          kind: 'log-email',
+          contactId: contactId || undefined,
+          presetTo: to || undefined,
+          presetSubject: p.get('subject') || p.get('subj') || undefined,
+          presetBody: p.get('body') || undefined,
+        });
+        break;
+      case 'log-call':
+        setDrawer({ kind: 'log-call', contactId: contactId || undefined });
+        break;
+      case 'contact':
+        if (contactId) setDrawer({ kind: 'contact', contactId });
+        break;
+      case 'contact-form': {
+        const c = contacts.find((x) => x.id === contactId);
+        setDrawer({ kind: 'contact-form', contact: c });
+        break;
+      }
+    }
+    const flow = p.get('flow');
+    if (flow) {
+      setView('flows');
+      setFlowKey(flow);
+    }
+    if (p.get('search')) setSearchOpen(true);
+    window.history.replaceState(null, '', `/${preservedEmbedQuery()}`);
+  }, [authed, contacts]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -213,11 +314,15 @@ export default function App() {
 
       <div className="flex min-w-0 flex-1 flex-col pb-[72px] md:pb-0">
         <header className="sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-gray-100 bg-white px-4 sm:z-50 sm:px-6">
-          <h1 className="text-lg font-semibold tracking-tight text-gray-900">CRM</h1>
-          {!isSupabaseConfigured && !isDriveConfigured && (
-            <span className="whitespace-nowrap rounded-full bg-gray-100 px-2.5 py-0.5 text-xs text-gray-500">
-              Local demo mode
-            </span>
+          {!EMBED && (
+            <>
+              <h1 className="text-lg font-semibold tracking-tight text-gray-900">CRM</h1>
+              {!isSupabaseConfigured && !isDriveConfigured && (
+                <span className="whitespace-nowrap rounded-full bg-gray-100 px-2.5 py-0.5 text-xs text-gray-500">
+                  {CASE_SERVED ? 'Case mode' : 'Local demo mode'}
+                </span>
+              )}
+            </>
           )}
           <div className="flex-1" />
           {mode === 'form' && drawer && (
@@ -253,7 +358,7 @@ export default function App() {
               Ctrl K
             </kbd>
           </button>
-          {isSupabaseConfigured && (
+          {!CASE_SERVED && isSupabaseConfigured && (
             <button
               type="button"
               onClick={() => signOut().then(() => setAuthed(false))}
@@ -262,7 +367,7 @@ export default function App() {
               Sign out
             </button>
           )}
-          {!isSupabaseConfigured && isDriveConfigured && (
+          {!CASE_SERVED && !isSupabaseConfigured && isDriveConfigured && (
             <button
               type="button"
               onClick={() =>
@@ -288,6 +393,16 @@ export default function App() {
               onChanged={reload}
             />
           )}
+          {view === 'desk' && (
+            <DeskView
+              contacts={contacts}
+              contactId={deskContactId}
+              reloadKey={reloadKey}
+              onSelectContact={setDeskContactId}
+              onOpenDrawer={setDrawer}
+              onChanged={reload}
+            />
+          )}
           {view === 'calendar' && (
             <CalendarView
               contacts={contacts}
@@ -306,7 +421,10 @@ export default function App() {
           {view === 'contacts' && (
             <ContactsView
               contacts={contacts}
-              onOpenContact={(c) => setDrawer({ kind: 'contact', contactId: c.id })}
+              onOpenContact={(c) => {
+                setDeskContactId(c.id);
+                setView('desk');
+              }}
               onOpenDedupe={() => setDrawer({ kind: 'dedupe' })}
               onChanged={reload}
             />
@@ -326,6 +444,9 @@ export default function App() {
               onOpenMatter={(m) => setDrawer({ kind: 'matter', matter: m })}
             />
           )}
+          {view === 'flows' && CASE_SERVED && (
+            <FlowsView reloadKey={reloadKey} initialKey={flowKey} />
+          )}
         </main>
       </div>
 
@@ -343,6 +464,11 @@ export default function App() {
               onNote={(id) => setDrawer({ kind: 'note', contactId: id })}
               onOpenAppointment={(a) => setDrawer({ kind: 'appointment', appointment: a })}
               onOpenMatter={(m) => setDrawer({ kind: 'matter', matter: m })}
+              onOpenDesk={(id) => {
+                setDeskContactId(id);
+                closeDrawer();
+                setView('desk');
+              }}
               onDeleted={() => {
                 reload();
                 closeDrawer();
@@ -439,6 +565,9 @@ export default function App() {
             <LogEmailForm
               contactId={drawer.contactId}
               presetMatterId={drawer.presetMatterId}
+              presetTo={drawer.presetTo}
+              presetSubject={drawer.presetSubject}
+              presetBody={drawer.presetBody}
               contacts={contacts}
               onSaved={saved}
               onCancel={closeDrawer}
@@ -484,7 +613,7 @@ function drawerTitle(drawer: NonNullable<DrawerState>, contact?: Contact): strin
     case 'booking':
       return drawer.appointment ? 'Edit booking' : 'New booking';
     case 'contact-form':
-      return drawer.contact ? 'Edit contact' : 'New contact';
+      return drawer.contact?.id ? 'Edit contact' : 'New contact';
     case 'log-call':
       return 'Log call';
     case 'log-email':
@@ -514,6 +643,7 @@ function ContactDrawerBody({
   onNote,
   onOpenAppointment,
   onOpenMatter,
+  onOpenDesk,
   onDeleted,
 }: {
   contactId: string;
@@ -526,6 +656,7 @@ function ContactDrawerBody({
   onNote: (id: string) => void;
   onOpenAppointment: (a: Appointment) => void;
   onOpenMatter: (m: Matter) => void;
+  onOpenDesk: (id: string) => void;
   onDeleted: () => void;
 }) {
   const contact = contacts.find((c) => c.id === contactId);
@@ -564,6 +695,13 @@ function ContactDrawerBody({
   return (
     <div className="space-y-6">
       <div className="space-y-2">
+        {(contact.kind || contact.status) && (
+          <p className="text-sm font-medium text-gray-500">
+            {[contact.kind, (contact.status ?? '').replaceAll('_', ' ')]
+              .filter(Boolean)
+              .join(' · ')}
+          </p>
+        )}
         {contact.org && <p className="text-base text-gray-700">{contact.org}</p>}
         {contact.role && <p className="text-sm text-gray-500">{contact.role}</p>}
         {contact.phone && (
@@ -611,6 +749,7 @@ function ContactDrawerBody({
         <ActionChip onClick={() => onLogEmail(contact.id)}>Log email</ActionChip>
         <ActionChip onClick={() => onEdit(contact)}>Edit</ActionChip>
         <ActionChip onClick={() => downloadVCard(contact)}>vCard</ActionChip>
+        <ActionChip onClick={() => onOpenDesk(contact.id)}>Open desk</ActionChip>
       </div>
       {matters.length > 0 && (
         <section>

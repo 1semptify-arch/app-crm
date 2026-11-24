@@ -71,11 +71,18 @@ point), but any Semptify module using the same OAuth client can read them.
 > screen can sign in — add your own Gmail there. Publishing the consent
 > screen removes that limit.
 
+## Hosted build (HTTPS)
+
+The app deploys to **Render** as a free static site from the dedicated
+`1semptify-arch/app-crm` GitHub repo (public deploy mirror — canonical
+source lives here in `1semptify-arch/app-crm-src`, private) — see
+`docs/HOSTING.md` for the topology, the one-time OAuth-origin step, and
+`tools/publish.sh` for shipping a fresh build.
+
 ## Install it on your phone (PWA)
 
-The app must be served over HTTPS for install on phones — deploy `dist`
-(`npm run build`) to any static host (Netlify, Vercel, Cloudflare Pages,
-GitHub Pages, or Supabase storage), then:
+The app must be served over HTTPS for install on phones — the Render
+deploy gives it a stable `https://*.onrender.com` origin, then:
 
 - **Android (Chrome):** open the site → menu → **Install app** /
   **Add to Home screen**.
@@ -91,15 +98,28 @@ for previously loaded pages.
 `getEmailPlugin`. The built-in `ManualEmailPlugin` does nothing on send and
 writes "Log email" entries into the interactions table.
 
-`src/services/smartBrainEmail.ts` is the "smart brain" inbound-log plugin:
-set `VITE_CRM_INBOUND_MAIL_URL` to an endpoint that returns a JSON array of
-`{id, from, subject, body, date}` and the plugin registers itself at startup.
-A **Sync inbox** button appears on the Log view — it pulls the feed, matches
-each sender's address to a contact's email, and logs new messages as `email`
-interactions. Dedupe is by `plugin_data.inbound_id` in the interactions
-table, so messages are never double-logged even across devices. Unmatched
-senders are reported in the sync note and skipped. Sending stays manual
-(`sendConfirmation` is a no-op) until a real outbound transport exists.
+`src/services/smartBrainEmail.ts` is the "smart brain" plugin — one seam,
+two transports:
+
+- **Gmail transport (default when `VITE_GOOGLE_CLIENT_ID` is set):**
+  `src/services/googleMail.ts` holds a second GIS token client on the same
+  OAuth client with `gmail.send` + `gmail.readonly` scopes (Drive keeps its
+  narrow `drive.appdata` token). **Sync inbox** pulls your real Gmail inbox
+  and **Send via Gmail** on the Log email form sends the merged message for
+  real — both prompt Google consent on first use, no server involved.
+  Add the two Gmail scopes to the OAuth consent screen's scope list for a
+  clean consent dialog (works without it in testing mode).
+- **JSON endpoint transport:** set `VITE_CRM_INBOUND_MAIL_URL` to an
+  endpoint that returns a JSON array of `{id, from, subject, body, date}` —
+  `tools/inbox_endpoint.py` is a ready-made stdlib one (POST /messages to
+  push mail in, GET /inbox serves the feed). Other tools can drop inbound
+  mail there for the CRM to pick up.
+
+Either way: **Sync inbox** on the Log view pulls the feed, matches each
+sender's address to a contact's email, and logs new messages as `email`
+interactions. Dedupe is by `plugin_data.inbound_id`, so messages are never
+double-logged even across devices. Unmatched senders are reported in the
+sync note and skipped.
 
 ### Email templates & merge
 
@@ -171,8 +191,9 @@ currently filtered rows (same as Contacts).
   download or delete it later. Files live in *your* storage, never on a server:
   Drive mode stores real files in the hidden `appDataFolder` (the existing
   `drive.appdata` scope already covers it — no new consent), local demo mode
-  keeps bodies inline (files capped at 1 MB), and Supabase mode records
-  metadata only — connect Drive for file content.
+  keeps bodies inline (files capped at 1 MB), and Supabase mode stores bytes
+  in a private `crm-documents` storage bucket (one folder per user — re-run
+  `supabase/schema.sql` to add it to an existing project).
 
 ## Contacts
 

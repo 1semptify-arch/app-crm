@@ -14,6 +14,36 @@ export const MATTER_STAGES: MatterStage[] = [
   'closed',
 ];
 
+// Outreach pipeline states the case desk actually uses (contacts.status).
+export const CONTACT_STATUSES = [
+  'new',
+  'target',
+  'not_called',
+  'intake_sent',
+  'replied',
+  'contacted',
+  'consult_set',
+  'active',
+  'open',
+  'declined',
+  'conflicted',
+  'closed',
+] as const;
+export type ContactStatus = (typeof CONTACT_STATUSES)[number];
+
+// Who this person is in the case (contacts.kind).
+export const CONTACT_KINDS = [
+  'attorney',
+  'party',
+  'opposing',
+  'witness',
+  'agency',
+  'court',
+  'organization',
+  'other',
+] as const;
+export type ContactKind = (typeof CONTACT_KINDS)[number];
+
 export interface Contact {
   id: string;
   user_id: string;
@@ -25,6 +55,10 @@ export interface Contact {
   address?: string | null;
   website?: string | null;
   tags: string[];
+  kind?: string | null;
+  status?: string | null;
+  lane?: string | null;
+  notes?: string | null;
   plugin_data: Record<string, unknown>;
   created_at: string;
 }
@@ -91,6 +125,10 @@ export interface ContactInput {
   address?: string | null;
   website?: string | null;
   tags?: string[];
+  kind?: string | null;
+  status?: string | null;
+  lane?: string | null;
+  notes?: string | null;
   plugin_data?: Record<string, unknown>;
 }
 

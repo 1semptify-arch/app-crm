@@ -40,12 +40,18 @@ const SAVE_AS = '__save_as__';
 export function LogEmailForm({
   contactId,
   presetMatterId,
+  presetTo,
+  presetSubject,
+  presetBody,
   contacts,
   onSaved,
   onCancel,
 }: {
   contactId?: string;
   presetMatterId?: string;
+  presetTo?: string;
+  presetSubject?: string;
+  presetBody?: string;
   contacts: Contact[];
   onSaved: (i: Interaction) => void;
   onCancel: () => void;
@@ -54,8 +60,8 @@ export function LogEmailForm({
   const [matters, setMatters] = useState<Matter[]>([]);
   const [matterId, setMatterId] = useState(presetMatterId ?? '');
   const [direction, setDirection] = useState<'in' | 'out'>('out');
-  const [subject, setSubject] = useState('');
-  const [body, setBody] = useState('');
+  const [subject, setSubject] = useState(presetSubject ?? '');
+  const [body, setBody] = useState(presetBody ?? '');
   const [when, setWhen] = useState(nowLocal());
   const [dueDate, setDueDate] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -98,6 +104,9 @@ export function LogEmailForm({
   }, []);
 
   const contact = contacts.find((c) => c.id === selectedContact);
+  // Deep-link recipient: an explicit to= wins over the card's address
+  // (covers /compose?to=addr where addr isn't a contact yet).
+  const recipient = presetTo || contact?.email || '';
 
   function onTemplatePick(value: string) {
     if (value === SAVE_AS) {
@@ -187,7 +196,7 @@ export function LogEmailForm({
       setError('Pick a contact for this email.');
       return;
     }
-    if (!contact?.email) {
+    if (!recipient) {
       setError('That contact has no email address.');
       return;
     }
@@ -197,7 +206,7 @@ export function LogEmailForm({
     setError(null);
     try {
       await plugin.send(selectedContact, {
-        to: contact.email,
+        to: recipient,
         subject: applyTemplate(subject, contact),
         body: applyTemplate(body, contact),
         due_at: dueDate ? new Date(`${dueDate}T00:00:00`).toISOString() : null,
@@ -218,7 +227,7 @@ export function LogEmailForm({
       setError('Pick a contact for this email.');
       return;
     }
-    if (!contact?.email) {
+    if (!recipient) {
       setError('That contact has no email address.');
       return;
     }
@@ -227,7 +236,7 @@ export function LogEmailForm({
     try {
       const mergedSubject = applyTemplate(subject, contact);
       const mergedBody = applyTemplate(body, contact);
-      const mailto = `mailto:${contact.email}?subject=${encodeURIComponent(
+      const mailto = `mailto:${recipient}?subject=${encodeURIComponent(
         mergedSubject,
       )}&body=${encodeURIComponent(mergedBody)}`;
       await getEmailPlugin().logThread(selectedContact, {

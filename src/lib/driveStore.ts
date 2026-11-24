@@ -241,6 +241,45 @@ async function ensureFileId(name: string): Promise<string> {
   return data.id;
 }
 
+// --- Storage envelope (compat contract, semptify.storage v1) ----------------
+// Every module collection file is an enveloped document so cross-module
+// readers and future versions can trust what they're holding:
+//   { semptify_storage: 1, module: 'crm', collection: 'contacts',
+//     updated: '<iso>', rows: [...] }
+// Legacy v0 files were bare JSON arrays — readRows upgrades them on read
+// and the next write re-persists them enveloped. A file stamped with a
+// version NEWER than we understand must fail loudly, never silently
+// parse as something else.
+const STORAGE_VERSION = 1;
+const MODULE_NAME = 'crm';
+
+interface StorageEnvelope<T> {
+  semptify_storage: number;
+  module: string;
+  collection: string;
+  updated: string;
+  rows: T[];
+}
+
+function collectionOf(name: string): string {
+  return name.replace(/^semptify\.crm\./, '').replace(/\.json$/, '');
+}
+
+function unwrap<T>(raw: unknown, name: string): T[] {
+  if (Array.isArray(raw)) return raw as T[]; // v0 legacy — bare array
+  const env = raw as Partial<StorageEnvelope<T>> | null;
+  if (env && Array.isArray(env.rows)) {
+    const v = env.semptify_storage ?? 0;
+    if (v > STORAGE_VERSION) {
+      throw new Error(
+        `${name} was written by a newer storage version (v${v}); update the app.`,
+      );
+    }
+    return env.rows;
+  }
+  throw new Error(`${name}: unrecognized storage format.`);
+}
+
 async function readRows<T>(name: string): Promise<T[]> {
   const id = await findFileId(name);
   if (!id) return [];
@@ -248,15 +287,22 @@ async function readRows<T>(name: string): Promise<T[]> {
   if (res.status === 404) return [];
   if (!res.ok) throw new Error(`Drive read failed (${res.status}).`);
   const text = await res.text();
-  return text ? (JSON.parse(text) as T[]) : [];
+  return text ? unwrap<T>(JSON.parse(text), name) : [];
 }
 
 async function writeRows<T>(name: string, rows: T[]): Promise<void> {
   const id = await ensureFileId(name);
+  const envelope: StorageEnvelope<T> = {
+    semptify_storage: STORAGE_VERSION,
+    module: MODULE_NAME,
+    collection: collectionOf(name),
+    updated: new Date().toISOString(),
+    rows,
+  };
   const res = await driveFetch(`${UPLOAD}/files/${id}?uploadType=media`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(rows),
+    body: JSON.stringify(envelope),
   });
   if (!res.ok) throw new Error(`Drive write failed (${res.status}).`);
 }

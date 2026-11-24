@@ -127,3 +127,56 @@ the client's **Authorized JavaScript origins**.
   `LocalStore`-style in-memory mirror can share all the row logic.
 - No PII transits Semptify servers by construction — keep it that way:
   don't add a Semptify-side proxy to this flow.
+
+## Compat contract — semptify.storage v1
+
+One shared OAuth client ID is the keystone for every Semptify module
+("Semptify Storage"). Every module authenticates through it; no module
+ever gets its own OAuth consent. These rules keep files written by one
+module/version safe to read by another:
+
+- **Collection files are enveloped, never bare arrays.** Every
+  `semptify.<module>.<collection>.json` file's content is:
+
+  ```json
+  {
+    "semptify_storage": 1,
+    "module": "crm",
+    "collection": "contacts",
+    "updated": "<iso>",
+    "rows": [ ... ]
+  }
+  ```
+
+- **v0 = bare JSON array** (pre-contract). Readers MUST accept it and
+  re-persist enveloped on next write — never require a migration pass.
+- **Forward-compat guard is mandatory.** If `semptify_storage` is newer
+  than the reader understands, fail loudly ("written by a newer version,
+  update the app"). Silently parsing an unknown format is a data-loss
+  bug.
+- **Version bumps are per-collection envelope, not per row.** When a
+  module changes row shape it bumps `semptify_storage` and handles its
+  own v→v+1 migration on read.
+
+## Lazy vault provisioning
+
+Folders are created on FIRST NEED, never eagerly at onboarding — a user
+who never opens a module never gets its folders.
+
+- Module-owned content lives under `Semptify5.0/<module-or-Vault-subpath>/`
+  (visible Drive), provisioned via `ensureVaultPath(parts, module)` in
+  `src/services/drivePicker.ts` — find-or-create each segment, then stamp
+  `semptify.<module>.manifest.json` into the leaf:
+
+  ```json
+  { "semptify_storage": 1, "module": "crm", "scope": "drive.file", "created": "<iso>" }
+  ```
+
+- **Scope split:** `drive.appdata` for hidden module state
+  (appDataFolder), `drive.file` — requested lazily — for the visible
+  vault. Under the shared client, `drive.file` natively sees everything
+  the flagship provisioned; anything user-placed needs one picker open.
+- **Read-only binds user documents only.** Provisioning app-owned
+  folders/manifests is the same class as the flagship's Vault Installer —
+  permitted. Listing/browsing is confined to children of the resolved
+  `Semptify5.0/` root; reaching beyond it is structurally impossible.

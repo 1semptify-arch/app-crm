@@ -36,10 +36,12 @@ function statusLabel(i: Interaction): { text: string; className: string } {
   return { text: 'New', className: 'text-amber-600' };
 }
 
-const ACTION_CLS =
-  'inline-flex min-h-[44px] items-center gap-1.5 rounded-lg border border-gray-200 px-3.5 text-sm font-medium text-gray-700 hover:bg-gray-50';
-const PRIMARY_ACTION_CLS =
-  'inline-flex min-h-[44px] items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 text-sm font-medium text-white hover:bg-indigo-700';
+import {
+  projectToolbar,
+  TOOLBAR_ACTION_CLS as ACTION_CLS,
+  TOOLBAR_PRIMARY_CLS as PRIMARY_ACTION_CLS,
+  type ToolbarAction,
+} from '../lib/toolbar';
 
 export function TaskCard({
   interaction,
@@ -252,73 +254,116 @@ export function TaskCard({
           )}
         </div>
       </div>
-      <div className="mt-3 flex flex-wrap gap-2 pl-8">
-        {interaction.type === 'call' && (
-          <>
-            {contact?.phone && (
-              <a href={`tel:${contact.phone}`} onClick={touch} className={ACTION_CLS}>
-                <Icon name="phone" className="h-4 w-4" /> Call
-              </a>
+      {(() => {
+        // State → toolbar: only actions valid for this card's real state
+        // exist; the projector picks one primary + ≤3 visible + overflow.
+        const candidates: ToolbarAction[] = [];
+        if (!resolved) {
+          candidates.push({
+            key: 'done',
+            label: 'Mark done',
+            kind: 'primary',
+            icon: 'check',
+            run: () => setStatus('resolved'),
+          });
+        }
+        if (interaction.type === 'call') {
+          if (contact?.phone)
+            candidates.push({
+              key: 'call',
+              label: 'Call',
+              kind: 'ghost',
+              icon: 'phone',
+              href: `tel:${contact.phone}`,
+              run: touch,
+            });
+          if (cid)
+            candidates.push({
+              key: 'log-call',
+              label: 'Log follow-up',
+              kind: 'ghost',
+              run: () => openFollowUp({ kind: 'log-call', contactId: cid }),
+            });
+          if (cid)
+            candidates.push({
+              key: 'book',
+              label: 'Book follow-up',
+              kind: 'ghost',
+              run: () => openFollowUp({ kind: 'booking', presetContactId: cid }),
+            });
+        }
+        if (interaction.type === 'email') {
+          if (contact?.email)
+            candidates.push({
+              key: 'reply',
+              label: 'Reply',
+              kind: 'ghost',
+              icon: 'mail',
+              href: `mailto:${contact.email}`,
+              run: touch,
+            });
+          if (cid)
+            candidates.push({
+              key: 'log-email',
+              label: 'Log email',
+              kind: 'ghost',
+              run: () => openFollowUp({ kind: 'log-email', contactId: cid }),
+            });
+        }
+        candidates.push({
+          key: 'followup',
+          label: 'Set follow-up',
+          kind: 'ghost',
+          icon: 'calendar',
+          run: () => setFollowUpOpen((o) => !o),
+        });
+        if (resolved)
+          candidates.push({
+            key: 'reopen',
+            label: 'Reopen',
+            kind: 'ghost',
+            run: () => setStatus('new'),
+          });
+        const tb = projectToolbar(candidates);
+        const renderAction = (a: ToolbarAction) =>
+          a.href ? (
+            <a
+              key={a.key}
+              href={a.href}
+              onClick={a.run}
+              className={a.kind === 'primary' ? PRIMARY_ACTION_CLS : ACTION_CLS}
+            >
+              {a.icon && <Icon name={a.icon} className="h-4 w-4" />} {a.label}
+            </a>
+          ) : (
+            <button
+              key={a.key}
+              type="button"
+              onClick={a.run}
+              className={a.kind === 'primary' ? PRIMARY_ACTION_CLS : ACTION_CLS}
+            >
+              {a.icon && <Icon name={a.icon} className="h-4 w-4" />} {a.label}
+            </button>
+          );
+        return (
+          <div className="mt-3 flex flex-wrap gap-2 pl-8">
+            {tb.primary && renderAction(tb.primary)}
+            {tb.visible.map(renderAction)}
+            {tb.overflow.length > 0 && (
+              <details className="relative">
+                <summary
+                  className={`${ACTION_CLS} cursor-pointer list-none select-none`}
+                >
+                  More…
+                </summary>
+                <div className="absolute left-0 z-10 mt-1 flex min-w-[200px] flex-col gap-1 rounded-lg border border-gray-200 bg-white p-2 shadow-sm">
+                  {tb.overflow.map(renderAction)}
+                </div>
+              </details>
             )}
-            {cid && (
-              <button
-                type="button"
-                onClick={() => openFollowUp({ kind: 'log-call', contactId: cid })}
-                className={ACTION_CLS}
-              >
-                Log follow-up
-              </button>
-            )}
-            {cid && (
-              <button
-                type="button"
-                onClick={() => openFollowUp({ kind: 'booking', presetContactId: cid })}
-                className={ACTION_CLS}
-              >
-                Book follow-up
-              </button>
-            )}
-          </>
-        )}
-        {interaction.type === 'email' && (
-          <>
-            {contact?.email && (
-              <a href={`mailto:${contact.email}`} onClick={touch} className={ACTION_CLS}>
-                <Icon name="mail" className="h-4 w-4" /> Reply
-              </a>
-            )}
-            {cid && (
-              <button
-                type="button"
-                onClick={() => openFollowUp({ kind: 'log-email', contactId: cid })}
-                className={ACTION_CLS}
-              >
-                Log email
-              </button>
-            )}
-          </>
-        )}
-        <button
-          type="button"
-          onClick={() => setFollowUpOpen((o) => !o)}
-          className={ACTION_CLS}
-        >
-          <Icon name="calendar" className="h-4 w-4" /> Set follow-up
-        </button>
-        {resolved ? (
-          <button type="button" onClick={() => setStatus('new')} className={ACTION_CLS}>
-            Reopen
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setStatus('resolved')}
-            className={PRIMARY_ACTION_CLS}
-          >
-            <Icon name="check" className="h-4 w-4" /> Mark done
-          </button>
-        )}
-      </div>
+          </div>
+        );
+      })()}
       {followUpOpen && (
         <div className="mt-2 flex flex-wrap items-center gap-2 pl-8">
           <label className="text-sm text-gray-500" htmlFor={`due-${interaction.id}`}>

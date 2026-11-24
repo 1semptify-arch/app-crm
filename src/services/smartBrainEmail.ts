@@ -20,6 +20,9 @@ export interface InboxSyncReport {
   fetched: number;
   logged: number;
   alreadySeen: number;
+  /** New matched messages skipped this sync because the log cap was hit —
+   *  they stay unlogged (not marked seen) so the next sync picks them up. */
+  held: number;
   unmatched: { from: string; subject: string }[];
 }
 
@@ -44,13 +47,30 @@ export class SmartBrainEmailPlugin implements EmailPlugin {
     | ((msg: { to: string; subject: string; body: string }) => Promise<void>)
     | null;
   private syncing: Promise<InboxSyncReport> | null = null;
+  /** Most new matched messages one sync will write — paces noisy inboxes
+   *  so a single sync can't flood the timeline. Held messages stay
+   *  unlogged (unseen) and land on the next sync. */
+  private readonly maxLog: number;
+  /** True when a sync can run with no interactive prompt. The Gmail
+   *  transport's first call needs consent — auto-sync must not fire a
+   *  surprise OAuth popup on app open. */
+  private readonly silentCheck: () => boolean;
 
   constructor(
     fetcher: InboundFetcher,
     sender?: (msg: { to: string; subject: string; body: string }) => Promise<void>,
+    maxLog = 20,
+    silentCheck: () => boolean = () => true,
   ) {
     this.fetcher = fetcher;
     this.sender = sender ?? null;
+    this.maxLog = maxLog;
+    this.silentCheck = silentCheck;
+  }
+
+  /** Safe to sync in the background right now (no consent popup). */
+  canSyncSilently(): boolean {
+    return this.silentCheck();
   }
 
   /** True when a real outbound transport (e.g. Gmail) is attached. */
@@ -134,7 +154,13 @@ export class SmartBrainEmailPlugin implements EmailPlugin {
   }
 
   private async doSync(): Promise<InboxSyncReport> {
-    const report: InboxSyncReport = { fetched: 0, logged: 0, alreadySeen: 0, unmatched: [] };
+    const report: InboxSyncReport = {
+      fetched: 0,
+      logged: 0,
+      alreadySeen: 0,
+      held: 0,
+      unmatched: [],
+    };
     const messages = await this.fetcher();
     report.fetched = messages.length;
     if (messages.length === 0) return report;
@@ -165,6 +191,10 @@ export class SmartBrainEmailPlugin implements EmailPlugin {
       const contact = addr ? byEmail.get(addr) : undefined;
       if (!contact) {
         report.unmatched.push({ from: msg.from, subject: msg.subject ?? '' });
+        continue;
+      }
+      if (report.logged >= this.maxLog) {
+        report.held += 1; // not added to `seen` — next sync logs it
         continue;
       }
       const occurred = msg.date ? new Date(msg.date) : new Date();
@@ -222,6 +252,11 @@ export function createGmailBrainPlugin(): SmartBrainEmailPlugin {
       return msgs as InboundMessage[];
     },
     (msg) => sendGmailMessage(msg),
+    20,
+    // silent only once a gmail session token exists — before consent the
+    // fetcher would pop an OAuth dialog, so auto-sync stays off until the
+    // user has clicked Sync once themselves.
+    () => getGmailSession() !== null,
   );
 }
 

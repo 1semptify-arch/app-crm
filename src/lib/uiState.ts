@@ -3,11 +3,13 @@ import type { Appointment, ApptStatus, Contact, Interaction, Matter } from '../t
 
 export type ViewKey =
   | 'today'
+  | 'desk'
   | 'calendar'
   | 'appointments'
   | 'contacts'
   | 'inbox'
-  | 'matters';
+  | 'matters'
+  | 'flows';
 
 export type DrawerState =
   | { kind: 'contact'; contactId: string }
@@ -22,7 +24,16 @@ export type DrawerState =
   | { kind: 'contact-form'; contact?: Contact }
   | { kind: 'matter-form'; matter?: Matter; presetContactId?: string }
   | { kind: 'log-call'; contactId?: string; presetMatterId?: string }
-  | { kind: 'log-email'; contactId?: string; presetMatterId?: string }
+  | {
+      kind: 'log-email';
+      contactId?: string;
+      presetMatterId?: string;
+      // Deep-link prefill (crm_store /compose shim): recipient override when
+      // the caller named an address that isn't a contact, plus subject/body.
+      presetTo?: string;
+      presetSubject?: string;
+      presetBody?: string;
+    }
   | { kind: 'note'; contactId?: string; presetMatterId?: string }
   | { kind: 'edit-interaction'; interaction: Interaction }
   | { kind: 'dedupe' }
@@ -91,6 +102,7 @@ interface ActionSpec {
 
 const DEFAULT_BY_VIEW: Record<ViewKey, ActionSpec[]> = {
   today: [{ id: 'book', label: 'New booking', icon: 'plus', primary: true }],
+  desk: [],
   calendar: [{ id: 'book', label: 'New booking', icon: 'plus', primary: true }],
   appointments: [{ id: 'book', label: 'New booking', icon: 'plus', primary: true }],
   contacts: [{ id: 'new-contact', label: 'Contact', icon: 'plus', primary: true }],
@@ -99,6 +111,7 @@ const DEFAULT_BY_VIEW: Record<ViewKey, ActionSpec[]> = {
     { id: 'log-call', label: 'Log call', icon: 'phone', primary: true },
     { id: 'quick-note', label: 'Quick note', icon: 'note' },
   ],
+  flows: [],
 };
 
 function defaultRun(id: string, ctx: ToolbarContext): () => void {

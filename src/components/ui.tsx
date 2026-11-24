@@ -104,7 +104,10 @@ export type IconName =
   | 'note'
   | 'trash'
   | 'briefcase'
-  | 'download';
+  | 'download'
+  | 'send'
+  | 'folder'
+  | 'file';
 
 export function Icon({ name, className = 'h-5 w-5' }: { name: IconName; className?: string }) {
   const paths: Record<IconName, ReactNode> = {
@@ -185,6 +188,13 @@ export function Icon({ name, className = 'h-5 w-5' }: { name: IconName; classNam
       </>
     ),
     download: <path d="M12 4v11m0 0l-4-4m4 4l4-4M4 20h16" />,
+    send: <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" />,
+    folder: (
+      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
+    ),
+    file: (
+      <path d="M7 3h7l4 4v12a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM14 3v4h4" />
+    ),
   };
   return (
     <svg
